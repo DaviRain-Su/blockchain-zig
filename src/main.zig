@@ -64,6 +64,9 @@ pub fn countAll(file: std.fs.File) !Stats {
             }
         }
     }
+    // 你现在是在遇到空白时给 words += 1。如果文件结尾处没有空白（例如内容是 "abc" 没有换行/空格），
+    // 循环退出前 in_word 还在 true，但循环结束后没有再加 1，导致漏计最后一个词。
+    if (in_word) words += 1;
 
     return Stats{ .lines = lines, .bytes = bytes, .words = words };
 }

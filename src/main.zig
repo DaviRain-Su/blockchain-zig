@@ -50,12 +50,6 @@ pub fn main() !void {
         want_c = true;
     }
 
-    // For debug
-    //std.debug.print("Args Length: {}, i: {}\n", .{ args.len, i });
-    //for (args) |arg| {
-    // std.debug.print("Arg: {s}\n", .{arg});
-    // }
-
     if (i >= args.len) {
         const stdin_file = std.fs.File.stdin(); // 返回一个 File
         const s = try countAll(stdin_file);
@@ -113,6 +107,32 @@ const Stats = struct {
     words: usize,
 };
 
+pub fn countFromSlice(slice: []const u8) !Stats {
+    var lines: usize = 0;
+    //var bytes: usize = 0;
+    var words: usize = 0;
+    var in_word: bool = false;
+
+    for (slice) |b| {
+        if (b == '\n') lines += 1;
+        if (std.ascii.isWhitespace(b)) {
+            if (in_word) {
+                words += 1;
+                in_word = false;
+            }
+        } else {
+            if (!in_word) {
+                in_word = true;
+            }
+        }
+    }
+    // 你现在是在遇到空白时给 words += 1。如果文件结尾处没有空白（例如内容是 "abc" 没有换行/空格），
+    // 循环退出前 in_word 还在 true，但循环结束后没有再加 1，导致漏计最后一个词。
+    if (in_word) words += 1;
+
+    return Stats{ .lines = lines, .bytes = slice.len, .words = words };
+}
+
 pub fn countAll(file: std.fs.File) !Stats {
     var lines: usize = 0;
     var bytes: usize = 0;
@@ -143,4 +163,12 @@ pub fn countAll(file: std.fs.File) !Stats {
     if (in_word) words += 1;
 
     return Stats{ .lines = lines, .bytes = bytes, .words = words };
+}
+
+test "countAll basic" {
+    const s = try countFromSlice("a\nb c\n");
+    std.debug.print("Lines: {}, Words: {}, Bytes: {}\n", .{ s.lines, s.words, s.bytes });
+    try std.testing.expectEqual(@as(usize, 2), s.lines);
+    try std.testing.expectEqual(@as(usize, 3), s.words);
+    try std.testing.expectEqual(@as(usize, 6), s.bytes);
 }

@@ -36,7 +36,7 @@ pub fn main() !void {
             'w' => want_w = true,
             'c' => want_c = true,
             else => {
-                try stderr.print("unknown flag: -{c}\nusage: {s} [-lwc] [FILE]\n", .{ ch, args[0] });
+                try stderr.print("unknown flag: -{c}\nusage: {s} [-lwc] [FILE...]\n", .{ ch, args[0] });
                 try stderr.flush();
                 std.process.exit(1);
             },
@@ -94,9 +94,9 @@ pub fn main() !void {
 }
 
 fn printLine(w: anytype, s: Stats, name: ?[]const u8, want_l: bool, want_w: bool, want_c: bool) !void {
-    if (want_l) try w.print("lines:{d} ", .{s.lines});
-    if (want_w) try w.print("words:{d} ", .{s.words});
-    if (want_c) try w.print("bytes:{d} ", .{s.bytes});
+    if (want_l) try w.print("lines: {d} ", .{s.lines});
+    if (want_w) try w.print("words: {d} ", .{s.words});
+    if (want_c) try w.print("bytes: {d} ", .{s.bytes});
     if (name) |n| try w.print("{s}", .{n});
     try w.print("\n", .{});
 }
@@ -170,5 +170,45 @@ test "countAll basic" {
     std.debug.print("Lines: {}, Words: {}, Bytes: {}\n", .{ s.lines, s.words, s.bytes });
     try std.testing.expectEqual(@as(usize, 2), s.lines);
     try std.testing.expectEqual(@as(usize, 3), s.words);
+    try std.testing.expectEqual(@as(usize, 6), s.bytes);
+}
+
+test "countFromSlice: trailing EOF word" {
+    const s = try countFromSlice("abc");
+    std.debug.print("Lines: {}, Words: {}, Bytes: {}\n", .{ s.lines, s.words, s.bytes });
+    try std.testing.expectEqual(@as(usize, 0), s.lines);
+    try std.testing.expectEqual(@as(usize, 1), s.words);
+    try std.testing.expectEqual(@as(usize, 3), s.bytes);
+}
+
+test "countFromSlice: ' a\n\nb' " {
+    const s = try countFromSlice(" a\n\nb");
+    std.debug.print("Lines: {}, Words: {}, Bytes: {}\n", .{ s.lines, s.words, s.bytes });
+    try std.testing.expectEqual(@as(usize, 2), s.lines);
+    try std.testing.expectEqual(@as(usize, 2), s.words);
+    try std.testing.expectEqual(@as(usize, 5), s.bytes);
+}
+
+test "countFromSlice: empty " {
+    const s = try countFromSlice("");
+    std.debug.print("Lines: {}, Words: {}, Bytes: {}\n", .{ s.lines, s.words, s.bytes });
+    try std.testing.expectEqual(@as(usize, 0), s.lines);
+    try std.testing.expectEqual(@as(usize, 0), s.words);
+    try std.testing.expectEqual(@as(usize, 0), s.bytes);
+}
+
+test "countFromSlice: `a \tb\n` " {
+    const s = try countFromSlice("a \tb\n");
+    std.debug.print("Lines: {}, Words: {}, Bytes: {}\n", .{ s.lines, s.words, s.bytes });
+    try std.testing.expectEqual(@as(usize, 1), s.lines);
+    try std.testing.expectEqual(@as(usize, 2), s.words);
+    try std.testing.expectEqual(@as(usize, 5), s.bytes);
+}
+
+test "countFromSlice: `a\r\nb\r\n` " {
+    const s = try countFromSlice("a\r\nb\r\n");
+    std.debug.print("Lines: {}, Words: {}, Bytes: {}\n", .{ s.lines, s.words, s.bytes });
+    try std.testing.expectEqual(@as(usize, 2), s.lines);
+    try std.testing.expectEqual(@as(usize, 2), s.words);
     try std.testing.expectEqual(@as(usize, 6), s.bytes);
 }

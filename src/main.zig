@@ -22,9 +22,18 @@ pub fn main() !void {
 
     var i: usize = 1;
     while (i < args.len and args[i].len >= 2 and args[i][0] == '-') {
+        if (std.mem.eql(u8, args[i], "--")) { // 终止选项
+            i += 1;
+            break;
+        }
         if (std.mem.eql(u8, args[i], "-h") or std.mem.eql(u8, args[i], "--help")) {
             try stderr.print("usage: {s} [-lwc] [FILE...]\n", .{args[0]});
-            try stderr.print("  -l  lines    -w  words    -c  bytes\n", .{});
+            try stderr.print("  -l  lines\n", .{});
+            try stderr.print("  -w  words\n", .{});
+            try stderr.print("  -c  bytes\n", .{});
+            try stderr.print("  -h  help\n", .{});
+            try stderr.print("  - read from stdin\n", .{});
+            try stderr.print("  -- end of options\n", .{});
             try stderr.flush();
             std.process.exit(0);
         }
@@ -36,7 +45,7 @@ pub fn main() !void {
             'w' => want_w = true,
             'c' => want_c = true,
             else => {
-                try stderr.print("unknown flag: -{c}\nusage: {s} [-lwc] [FILE...]\n", .{ ch, args[0] });
+                try stderr.print("unknown flag: -{c}\nusage: {s} [-lwc] [FILE...] \n", .{ ch, args[0] });
                 try stderr.flush();
                 std.process.exit(1);
             },
@@ -50,7 +59,14 @@ pub fn main() !void {
         want_c = true;
     }
 
+    const is_tty = std.posix.isatty(std.posix.STDIN_FILENO);
+
     if (i >= args.len) {
+        if (is_tty) {
+            try stderr.print("reading from stdin... (Ctrl-D to finish)\n", .{});
+            try stderr.flush();
+        }
+
         const stdin_file = std.fs.File.stdin(); // 返回一个 File
         const s = try countAll(stdin_file);
 
@@ -65,6 +81,17 @@ pub fn main() !void {
         var files_ok: usize = 0;
         var total = Stats{ .lines = 0, .bytes = 0, .words = 0 };
         for (args[i..]) |path| {
+            if (std.mem.eql(u8, path, "-")) {
+                const stdin_file = std.fs.File.stdin(); // 返回一个 File
+                const s = try countAll(stdin_file); // 读一次标准输入
+                try printLine(stdout, s, path, want_l, want_w, want_c);
+                total.lines += s.lines;
+                total.bytes += s.bytes;
+                total.words += s.words;
+                files_ok += 1;
+                continue;
+            }
+
             var f = std.fs.cwd().openFile(path, .{ .mode = .read_only }) catch |e| {
                 try stderr.print("{s}: {s}\n", .{ path, @errorName(e) });
                 try stderr.flush();

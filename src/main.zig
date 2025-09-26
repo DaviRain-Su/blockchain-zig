@@ -22,6 +22,13 @@ pub fn main() !void {
 
     var i: usize = 1;
     while (i < args.len and args[i].len >= 2 and args[i][0] == '-') {
+        if (std.mem.eql(u8, args[i], "-h") or std.mem.eql(u8, args[i], "--help")) {
+            try stderr.print("usage: {s} [-lwc] [FILE...]\n", .{args[0]});
+            try stderr.print("  -l  lines    -w  words    -c  bytes\n", .{});
+            try stderr.flush();
+            std.process.exit(0);
+        }
+
         const opt = args[i];
         // 多个标志可合并，如 -lc
         for (opt[1..]) |ch| switch (ch) {
@@ -60,17 +67,44 @@ pub fn main() !void {
         try stdout.flush();
         try std.process.exit(0);
     } else {
-        var f = try std.fs.cwd().openFile(args[i], .{ .mode = .read_only });
-        defer f.close();
-        const s = try countAll(f);
+        var had_error = false;
+        var files_ok: usize = 0;
+        var total = Stats{ .lines = 0, .bytes = 0, .words = 0 };
+        for (args[i..]) |path| {
+            var f = std.fs.cwd().openFile(path, .{ .mode = .read_only }) catch |e| {
+                try stderr.print("{s}: {s}\n", .{ path, @errorName(e) });
+                try stderr.flush();
+                had_error = true;
+                continue;
+            };
+            defer f.close();
+            const s = try countAll(f);
+            files_ok += 1;
 
-        if (want_l) try stdout.print("lines: {d}\n", .{s.lines});
-        if (want_w) try stdout.print("words: {d}\n", .{s.words});
-        if (want_c) try stdout.print("bytes: {d}\n", .{s.bytes});
+            try printLine(stdout, s, path, want_l, want_w, want_c);
+            total.lines += s.lines;
+            total.bytes += s.bytes;
+            total.words += s.words;
+            try stdout.print("************************************\n", .{});
+        }
 
+        if (files_ok > 1) {
+            if (want_l) try stdout.print("lines: {d} ", .{total.lines});
+            if (want_w) try stdout.print("words: {d} ", .{total.words});
+            if (want_c) try stdout.print("bytes: {d} ", .{total.bytes});
+            try stdout.print("total\n", .{});
+        }
         try stdout.flush();
-        try std.process.exit(0);
+        std.process.exit(if (had_error) 1 else 0);
     }
+}
+
+fn printLine(w: anytype, s: Stats, name: ?[]const u8, want_l: bool, want_w: bool, want_c: bool) !void {
+    if (want_l) try w.print("lines:{d} ", .{s.lines});
+    if (want_w) try w.print("words:{d} ", .{s.words});
+    if (want_c) try w.print("bytes:{d} ", .{s.bytes});
+    if (name) |n| try w.print("{s}", .{n});
+    try w.print("\n", .{});
 }
 
 const Stats = struct {

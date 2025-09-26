@@ -15,19 +15,59 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    if (args.len < 2) {
+    // 解析 -l / -w / -c
+    var want_l = false;
+    var want_w = false;
+    var want_c = false;
+
+    var i: usize = 1;
+    while (i < args.len and args[i].len >= 2 and args[i][0] == '-') {
+        const opt = args[i];
+        // 多个标志可合并，如 -lc
+        for (opt[1..]) |ch| switch (ch) {
+            'l' => want_l = true,
+            'w' => want_w = true,
+            'c' => want_c = true,
+            else => {
+                try stderr.print("unknown flag: -{c}\nusage: {s} [-lwc] [FILE]\n", .{ ch, args[0] });
+                try stderr.flush();
+                std.process.exit(1);
+            },
+        };
+        i += 1;
+    }
+    // 如果没给任何标志，默认全开
+    if (!want_l and !want_w and !want_c) {
+        want_l = true;
+        want_w = true;
+        want_c = true;
+    }
+
+    // For debug
+    //std.debug.print("Args Length: {}, i: {}\n", .{ args.len, i });
+    //for (args) |arg| {
+    // std.debug.print("Arg: {s}\n", .{arg});
+    // }
+
+    if (i >= args.len) {
         const stdin_file = std.fs.File.stdin(); // 返回一个 File
         const s = try countAll(stdin_file);
 
-        try stdout.print("lines: {d}\nbytes: {d}\nwords: {d}\n", .{ s.lines, s.bytes, s.words });
+        if (want_l) try stdout.print("lines: {d}\n", .{s.lines});
+        if (want_w) try stdout.print("words: {d}\n", .{s.words});
+        if (want_c) try stdout.print("bytes: {d}\n", .{s.bytes});
+
         try stdout.flush();
         try std.process.exit(0);
     } else {
-        var f = try std.fs.cwd().openFile(args[1], .{ .mode = .read_only });
+        var f = try std.fs.cwd().openFile(args[i], .{ .mode = .read_only });
         defer f.close();
         const s = try countAll(f);
 
-        try stdout.print("lines: {d}\nbytes: {d}\nwords: {d}\n", .{ s.lines, s.bytes, s.words });
+        if (want_l) try stdout.print("lines: {d}\n", .{s.lines});
+        if (want_w) try stdout.print("words: {d}\n", .{s.words});
+        if (want_c) try stdout.print("bytes: {d}\n", .{s.bytes});
+
         try stdout.flush();
         try std.process.exit(0);
     }

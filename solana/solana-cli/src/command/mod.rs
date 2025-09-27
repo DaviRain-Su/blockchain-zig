@@ -12,6 +12,7 @@ pub struct Args {
     pub command: Command,
 }
 
+// Use patten: https://github.com/clap-rs/clap/blob/8e3d03639756241aa2b7dd624a7f5852bef76f31/examples/git-derive.rs
 #[derive(Subcommand)]
 pub enum Command {
     /// 目前只能使用默认配置文件(～/.config/solana/cli/config.yml)中的账户作为发送账户转移SOL

@@ -19,6 +19,8 @@ pub fn main() !void {
     var want_l = false;
     var want_w = false;
     var want_c = false;
+    // -L
+    var want_L = false;
 
     var i: usize = 1;
     while (i < args.len and args[i].len >= 2 and args[i][0] == '-') {
@@ -44,6 +46,7 @@ pub fn main() !void {
             'l' => want_l = true,
             'w' => want_w = true,
             'c' => want_c = true,
+            'L' => want_L = true, // should add there
             else => {
                 try stderr.print("unknown flag: -{c}\nusage: {s} [-lwc] [FILE...] \n", .{ ch, args[0] });
                 try stderr.flush();
@@ -79,12 +82,12 @@ pub fn main() !void {
     } else {
         var had_error = false;
         var files_ok: usize = 0;
-        var total = Stats{ .lines = 0, .bytes = 0, .words = 0 };
+        var total = Stats{ .lines = 0, .bytes = 0, .words = 0, .max_line_length = 0 };
         for (args[i..]) |path| {
             if (std.mem.eql(u8, path, "-")) {
                 const stdin_file = std.fs.File.stdin(); // 返回一个 File
                 const s = try countAll(stdin_file); // 读一次标准输入
-                try printLine(stdout, s, path, want_l, want_w, want_c);
+                try printLine(stdout, s, path, want_l, want_w, want_c, want_L);
                 total.lines += s.lines;
                 total.bytes += s.bytes;
                 total.words += s.words;
@@ -102,7 +105,7 @@ pub fn main() !void {
             const s = try countAll(f);
             files_ok += 1;
 
-            try printLine(stdout, s, path, want_l, want_w, want_c);
+            try printLine(stdout, s, path, want_l, want_w, want_c, want_L);
             total.lines += s.lines;
             total.bytes += s.bytes;
             total.words += s.words;
@@ -120,10 +123,11 @@ pub fn main() !void {
     }
 }
 
-fn printLine(w: anytype, s: Stats, name: ?[]const u8, want_l: bool, want_w: bool, want_c: bool) !void {
+fn printLine(w: anytype, s: Stats, name: ?[]const u8, want_l: bool, want_w: bool, want_c: bool, want_L: bool) !void {
     if (want_l) try w.print("lines: {d} ", .{s.lines});
     if (want_w) try w.print("words: {d} ", .{s.words});
     if (want_c) try w.print("bytes: {d} ", .{s.bytes});
+    if (want_L) try w.print("max line length: {d} ", .{s.max_line_length});
     if (name) |n| try w.print("{s}", .{n});
     try w.print("\n", .{});
 }
@@ -132,6 +136,7 @@ const Stats = struct {
     lines: usize,
     bytes: usize,
     words: usize,
+    max_line_length: usize,
 };
 
 pub fn countFromSlice(slice: []const u8) !Stats {
@@ -164,6 +169,8 @@ pub fn countAll(file: std.fs.File) !Stats {
     var lines: usize = 0;
     var bytes: usize = 0;
     var words: usize = 0;
+    var max_line_length: usize = 0;
+    var current_line_length: usize = 0;
     var in_word: bool = false;
     var chunk: [4096]u8 = undefined;
 
@@ -172,7 +179,16 @@ pub fn countAll(file: std.fs.File) !Stats {
         bytes += n;
         if (n == 0) break;
         for (chunk[0..n]) |b| {
-            if (b == '\n') lines += 1;
+            if (b == '\n') {
+                lines += 1;
+                // 更新最大行长度
+                if (current_line_length > max_line_length) {
+                    max_line_length = current_line_length;
+                }
+                current_line_length = 0;
+            }
+            current_line_length += 1;
+
             if (std.ascii.isWhitespace(b)) {
                 if (in_word) {
                     words += 1;
@@ -185,11 +201,16 @@ pub fn countAll(file: std.fs.File) !Stats {
             }
         }
     }
+
+    // 结尾行处理（文件没有换行符时）
+    if (current_line_length > max_line_length) {
+        max_line_length = current_line_length;
+    }
     // 你现在是在遇到空白时给 words += 1。如果文件结尾处没有空白（例如内容是 "abc" 没有换行/空格），
     // 循环退出前 in_word 还在 true，但循环结束后没有再加 1，导致漏计最后一个词。
     if (in_word) words += 1;
 
-    return Stats{ .lines = lines, .bytes = bytes, .words = words };
+    return Stats{ .lines = lines, .bytes = bytes, .words = words, .max_line_length = max_line_length };
 }
 
 test "countAll basic" {

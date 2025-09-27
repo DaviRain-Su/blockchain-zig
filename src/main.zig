@@ -21,6 +21,7 @@ pub fn main() !void {
     var want_c = false;
     // -L
     var want_L = false;
+    var want_m = false;
 
     var i: usize = 1;
     while (i < args.len and args[i].len >= 2 and args[i][0] == '-') {
@@ -47,6 +48,7 @@ pub fn main() !void {
             'w' => want_w = true,
             'c' => want_c = true,
             'L' => want_L = true, // should add there
+            'm' => want_m = true,
             else => {
                 try stderr.print("unknown flag: -{c}\nusage: {s} [-lwc] [FILE...] \n", .{ ch, args[0] });
                 try stderr.flush();
@@ -76,18 +78,20 @@ pub fn main() !void {
         if (want_l) try stdout.print("lines: {d}\n", .{s.lines});
         if (want_w) try stdout.print("words: {d}\n", .{s.words});
         if (want_c) try stdout.print("bytes: {d}\n", .{s.bytes});
+        if (want_L) try stdout.print("max line length: {d}\n", .{s.max_line_length});
+        if (want_m) try stdout.print("characters: {d}\n", .{s.characters});
 
         try stdout.flush();
         try std.process.exit(0);
     } else {
         var had_error = false;
         var files_ok: usize = 0;
-        var total = Stats{ .lines = 0, .bytes = 0, .words = 0, .max_line_length = 0 };
+        var total = Stats{ .lines = 0, .bytes = 0, .words = 0, .max_line_length = 0, .characters = 0 };
         for (args[i..]) |path| {
             if (std.mem.eql(u8, path, "-")) {
                 const stdin_file = std.fs.File.stdin(); // 返回一个 File
                 const s = try countAll(stdin_file); // 读一次标准输入
-                try printLine(stdout, s, path, want_l, want_w, want_c, want_L);
+                try printLine(stdout, s, path, want_l, want_w, want_c, want_L, want_m);
                 total.lines += s.lines;
                 total.bytes += s.bytes;
                 total.words += s.words;
@@ -105,10 +109,11 @@ pub fn main() !void {
             const s = try countAll(f);
             files_ok += 1;
 
-            try printLine(stdout, s, path, want_l, want_w, want_c, want_L);
+            try printLine(stdout, s, path, want_l, want_w, want_c, want_L, want_m);
             total.lines += s.lines;
             total.bytes += s.bytes;
             total.words += s.words;
+            total.characters += s.characters;
             try stdout.print("************************************\n", .{});
         }
 
@@ -123,11 +128,12 @@ pub fn main() !void {
     }
 }
 
-fn printLine(w: anytype, s: Stats, name: ?[]const u8, want_l: bool, want_w: bool, want_c: bool, want_L: bool) !void {
+fn printLine(w: anytype, s: Stats, name: ?[]const u8, want_l: bool, want_w: bool, want_c: bool, want_L: bool, want_m: bool) !void {
     if (want_l) try w.print("lines: {d} ", .{s.lines});
     if (want_w) try w.print("words: {d} ", .{s.words});
     if (want_c) try w.print("bytes: {d} ", .{s.bytes});
     if (want_L) try w.print("max line length: {d} ", .{s.max_line_length});
+    if (want_m) try w.print("characters: {d} ", .{s.characters});
     if (name) |n| try w.print("{s}", .{n});
     try w.print("\n", .{});
 }
@@ -137,6 +143,7 @@ const Stats = struct {
     bytes: usize,
     words: usize,
     max_line_length: usize,
+    characters: usize, // 字符统计
 };
 
 pub fn countFromSlice(slice: []const u8) !Stats {
@@ -171,14 +178,20 @@ pub fn countAll(file: std.fs.File) !Stats {
     var words: usize = 0;
     var max_line_length: usize = 0;
     var current_line_length: usize = 0;
+    var characters: usize = 0;
     var in_word: bool = false;
     var chunk: [4096]u8 = undefined;
 
     while (true) {
         const n = try file.read(chunk[0..]);
         bytes += n;
+
         if (n == 0) break;
+
         for (chunk[0..n]) |b| {
+            if (!isUtf8Continuation(b)) {
+                characters += 1;
+            }
             if (b == '\n') {
                 lines += 1;
                 // 更新最大行长度
@@ -210,7 +223,20 @@ pub fn countAll(file: std.fs.File) !Stats {
     // 循环退出前 in_word 还在 true，但循环结束后没有再加 1，导致漏计最后一个词。
     if (in_word) words += 1;
 
-    return Stats{ .lines = lines, .bytes = bytes, .words = words, .max_line_length = max_line_length };
+    return Stats{
+        .lines = lines,
+        .bytes = bytes,
+        .words = words,
+        .max_line_length = max_line_length,
+        .characters = characters,
+    };
+}
+
+//统计 UTF-8 的“起始字节”数量。UTF-8 的续字节满足 (b & 0b1100_0000) == 0b1000_0000，
+// 所以每遇到一个“不是续字节”的字节就 +1，得到的就是字符数（假设输入是有效 UTF-8）。
+// 这个方法天然支持跨块，无需状态机。
+inline fn isUtf8Continuation(b: u8) bool {
+    return (b & 0b1100_0000) == 0b1000_0000;
 }
 
 test "countAll basic" {

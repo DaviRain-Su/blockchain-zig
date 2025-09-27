@@ -47,8 +47,8 @@ pub fn main() !void {
             'l' => want_l = true,
             'w' => want_w = true,
             'c' => want_c = true,
-            'L' => want_L = true, // should add there
             'm' => want_m = true,
+            'L' => want_L = true,
             else => {
                 try stderr.print("unknown flag: -{c}\nusage: {s} [-lwc] [FILE...] \n", .{ ch, args[0] });
                 try stderr.flush();
@@ -58,7 +58,7 @@ pub fn main() !void {
         i += 1;
     }
     // 如果没给任何标志，默认全开
-    if (!want_l and !want_w and !want_c) {
+    if (!want_l and !want_w and !want_c and !want_m and !want_L) {
         want_l = true;
         want_w = true;
         want_c = true;
@@ -121,6 +121,7 @@ pub fn main() !void {
             if (want_l) try stdout.print("lines: {d} ", .{total.lines});
             if (want_w) try stdout.print("words: {d} ", .{total.words});
             if (want_c) try stdout.print("bytes: {d} ", .{total.bytes});
+            if (want_m) try stdout.print("characters: {d} ", .{total.characters});
             try stdout.print("total\n", .{});
         }
         try stdout.flush();

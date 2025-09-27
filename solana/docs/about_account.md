@@ -1,19 +1,20 @@
 # 关于solana中的账户问题
 
-solana上有两个需要注意⚠️的账户， 一个是通过solana sdk（Rust or typescript）通过RPC 请求返回的账户存储（Account)，
-另一个是在写solana合约的时候，传递给solana 合约的AccountInfo。
+solana上有两个需要注意⚠️的账户，这是从两种不同的视角来思考的。第一、**客户端视角**，其实也是账户在solana上实际的存储格式，以及通过 RPC 请求获取的 `Account` 结构
+第二个、**合约执行视角**，传递给智能合约的 `AccountInfo` 结构
 
-+ 程序账户
-+ 数据账户, 数据账户管理程序账户，数据账户的生成可以是通过PDA生成，也可以是直接创建账户而成，一般是根据不同的指令通过pda生成程序账户需要的数据账户
-+ 代币账户，有关代币的所有元信息
+
+## Solana上存储的账户分类
+
+- 程序账户（Program Account）
+- 数据账户（Data Account），程序账户管理数据账户。数据账户的生成可以是通过PDA生成，也可以是直接创建账户而成，一般是根据不同的指令通过pda生成程序账户需要的数据账户
+- 代币账户（Token Account），有关代币的所有元信息。
 
 需要深刻的理解这两个账户之间的不同，以便在开发过程中正确地使用它们。
 
 在 Solana 上，所有数据都存在于“账户”中。可以将 Solana 上的数据视为一个公共数据库，其中只有一个“账户”表，每个条目都是一个具有相同基础 账户类型的账户。
 
 > 注意这里说的只有一个账户表是类别传统的SQL数据库来说的，在solana实际的存储上只存在一个Address<->Account的一个对应关系表。
-
-
 
 ---
 
@@ -88,12 +89,15 @@ Solana 上的账户可以存储“状态”或“可执行”程序。每个账�
 
 Solana 账户包含以下两种内容之一：
 
-+ 状态：用于读取和持久化的数据。例如，关于代币的信息、用户数据或程序中定义的其他数据。如果在executable为false的情况下，账户存储状态数据。
-+ 可执行程序：包含 Solana 程序实际代码的账户。这些账户存储用户可以调用的指令。根据标志executable来判断，如果为true，则账户存储可执行程序。
+- 状态（也就是数据账户）：用于读取和持久化的数据。例如，关于代币的信息、用户数据或程序中定义的其他数据。如果在executable为false的情况下，账户存储状态数据。
+- 可执行程序（也就是程序账户）：包含 Solana 程序实际代码的账户。这些账户存储用户可以调用的指令。根据标志executable来判断，如果为true，则账户存储可执行程序。
 
 程序代码和程序状态的分离是 Solana 账户模型的一个关键特性。 （*******这个是不是也是solana能并行快速的原因呢？？******）
 
 一个获取钱包账户的代码例子：
+
+这是获取的一个钱包账户。在 Solana 上，“钱包账户”是由[系统程序](https://github.com/anza-xyz/agave/tree/v2.1.11/programs/system)（地址： 11111111111111111111111111111111）拥有的账户，系统程序是 Solana 的内置程序之一。钱包账户主要用于持有 SOL（记录在 lamports 字段中）并签署交易。
+
 
 ```rust
 use solana_cli_config::{CONFIG_FILE, Config};
@@ -121,9 +125,6 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-这是获取的一个钱包账户。在 Solana 上，“钱包账户”是由[系统程序](https://github.com/anza-xyz/agave/tree/v2.1.11/programs/system)（地址： 11111111111111111111111111111111）拥有的账户，系统程序是 Solana 的内置程序之一。钱包账户主要用于持有 SOL（记录在 lamports 字段中）并签署交易。
-
-
 下面是输出的内容：
 
 ```
@@ -145,6 +146,8 @@ async fn main() -> anyhow::Result<()> {
 - rentEpoch 字段是一个遗留字段，源自已弃用的机制，其中账户需要支付 "rent"（以 lamports 为单位）来维护其在网络上的数据。该字段目前未使用，但为了向后兼容仍然保留。
 
 一个获取程序账户的例子（这里使用了Token Program）：
+
+这是一个程序账户,Token Program 是 Solana 上的一个可执行程序账户。与钱包账户类似，程序账户具有相同的基础 账户 数据结构，但其字段存在关键差异。
 
 ```rust
 use solana_cli_config::{CONFIG_FILE, Config};
@@ -192,11 +195,9 @@ TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA: Account {
 }
 ```
 
-这是一个程序账户,Token Program 是 Solana 上的一个可执行程序账户。与钱包账户类似，程序账户具有相同的基础 账户 数据结构，但其字段存在关键差异。
-
-+ executable 字段被设置为 true，表明此账户的 data 字段包含可执行的程序代码。
-+ 对于程序账户，data 字段存储程序的可执行代码。相比之下，钱包账户的数据字段是空的。 当您部署一个 Solana 程序时，该程序的可执行代码存储在账户的 data 字段中。
-+ 可执行程序账户还会指定一个程序作为账户的 owner。所有程序账户都由一个加载器程序（Loader program）拥有，这是一类内置程序，负责拥有 Solana 上的可执行程序账户。 对于 Token Program，owner 是 BPFLoader2 程序。
+-  executable 字段被设置为 true，表明此账户的 data 字段包含可执行的程序代码。
+- 对于程序账户，data 字段存储程序的可执行代码。相比之下，钱包账户的数据字段是空的。 当您部署一个 Solana 程序时，该程序的可执行代码存储在账户的 data 字段中。
+- 可执行程序账户还会指定一个程序作为账户的 owner。所有程序账户都由一个加载器程序（Loader program）拥有，这是一类内置程序，负责拥有 Solana 上的可执行程序账户。 对于 Token Program，owner 是 BPFLoader2 程序。
 
 
 一个存储了状态的账户的例子: 这里使用的是存储了USDC meta信息的账户，也就是mint账户 EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v (USDC)
@@ -248,10 +249,10 @@ EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v (USDC): Account {
 }
 ```
 
-+ 在此示例中需要注意的关键点是，Mint 账户存储的是状态，而不是可执行代码。Mint 账户由 Token Program 拥有，该程序包含定义如何创建和更新 Mint 账户的指令。
-+ executable 字段是 false，因为 Mint 账户的 data 字段存储的是状态，而不是可执行代码。Token Program 定义了 Mint 数据类型，该类型存储在 Mint 账户的 data 字段中。
-+ data 字段包含序列化的 Mint 账户状态，例如 Mint 权限、总供应量、小数位数。要从 Mint 账户中读取数据，必须将 data 字段反序列化为 Mint 数据类型。
-+ Token Program (TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA) 拥有 Mint 账户。这意味着 Mint 账户的 data 字段只能通过 Token Program 定义的指令进行修改。
+-  在此示例中需要注意的关键点是，Mint 账户存储的是状态，而不是可执行代码。Mint 账户由 Token Program 拥有，该程序包含定义如何创建和更新 Mint 账户的指令。
+- executable 字段是 false，因为 Mint 账户的 data 字段存储的是状态，而不是可执行代码。Token Program 定义了 Mint 数据类型，该类型存储在 Mint 账户的 data 字段中。
+- data 字段包含序列化的 Mint 账户状态，例如 Mint 权限、总供应量、小数位数。要从 Mint 账户中读取数据，必须将 data 字段反序列化为 Mint 数据类型。
+- Token Program (TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA) 拥有 Mint 账户。这意味着 Mint 账户的 data 字段只能通过 Token Program 定义的指令进行修改。
 
 #### **注意事项：**
 
@@ -333,10 +334,6 @@ EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v (USDC): Account {
   * 通过 `AccountInfo`，合约可以在执行时访问和操作这些账户的状态。
 
 * **PDA 账户** 是 Solana 中非常重要的概念，常用于存储合约的状态或防止外部控制。
-
----
-
-您的思路已经非常接近准确，接下来我将根据您的理解进一步整理和澄清 Solana 账户模型，帮助您更加清晰地把握账户在不同上下文中的角色。我们将从 Solana 账户的存储结构、如何通过 RPC 获取账户信息以及如何在合约中使用 `AccountInfo` 这两个视角来进行全面的整理。
 
 ---
 
@@ -470,9 +467,6 @@ pub struct AccountInfo {
 
 Solana 的账户模型通过将账户分为不同类型（程序账户、数据账户、代币账户等），为开发者提供了灵活的数据存储和管理机制。理解 `Account` 和 `AccountInfo` 之间的区别，以及如何在合约中使用它们，是开发 Solana 应用的基础。
 
----
-
-为了帮助您理清 **Solana 账户模型** 以及不同账户类型的作用，我将结合您提供的信息，整理出一个更加清晰且逻辑性强的总结，特别是针对您提到的两个关键点：**通过 Solana SDK 获取的账户（Account）** 和 **传递给合约的 `AccountInfo`**，以及它们在 Solana 网络和合约执行过程中的不同角色。通过这个整理，我希望能帮助您更加系统地理解 Solana 的账户模型，特别是如何在不同上下文中正确使用它们。
 
 ---
 

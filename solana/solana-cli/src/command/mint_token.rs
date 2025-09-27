@@ -11,7 +11,6 @@ use solana_system_interface::instruction as system_instruction;
 use spl_token::solana_program::program_pack::Pack;
 use spl_token::{ID as TOKEN_PROGRAM_ID, instruction::initialize_mint2, state::Mint};
 
-//Funding account
 pub async fn mint_token(mint_account: &Keypair, funding_account: &Keypair) -> anyhow::Result<()> {
     let client = RpcClient::new_with_commitment(
         "http://localhost:8899".to_string(),

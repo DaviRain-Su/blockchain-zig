@@ -22,5 +22,9 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Address: {}, Balance: {}", key.pubkey(), Sol(balance));
 
+    // get AccountInfo
+    let account_info = client.get_account(&key.pubkey()).await?;
+    println!("{:#?}", account_info);
+
     Ok(())
 }

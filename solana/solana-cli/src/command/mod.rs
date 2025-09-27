@@ -3,6 +3,7 @@ use solana_sdk::pubkey::Pubkey;
 
 pub mod accountinfo;
 pub mod balance;
+pub mod mint_token;
 pub mod transfer;
 
 #[derive(Parser)]
@@ -32,4 +33,6 @@ pub enum Command {
         /// 账户的公钥
         address: Pubkey,
     },
+    /// 创建一个新账户并初始化为一个代币账户
+    MintToken,
 }

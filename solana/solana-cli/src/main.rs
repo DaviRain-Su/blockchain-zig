@@ -1,19 +1,24 @@
-use std::str::FromStr;
-
-use solana_address::Address;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::native_token::Sol;
+use solana_sdk::signature::Signer;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
+    // read solana config file to load default rpc url and commitment config
+    let config = solana_cli_config::Config::load(solana_cli_config::CONFIG_FILE.as_ref().unwrap())?;
+
     let client = RpcClient::new_with_commitment(
         "http://localhost:8899".to_string(),
         CommitmentConfig::confirmed(),
     );
 
-    let address = Address::from_str("8uAPC2UxiBjKmUksVVwUA6q4RctiXkgSAsovBR39cd1i").unwrap();
-    let balance = client.get_balance(&address).await.unwrap();
+    let key = solana_sdk::signer::keypair::read_keypair_file(config.keypair_path)
+        .map_err(|err| anyhow::Error::msg(format!("Failed to read keypair file: {}", err)))?;
 
-    println!("Address: {}, Balance: {}", address, Sol(balance));
+    let balance = client.get_balance(&key.pubkey()).await?;
+
+    println!("Address: {}, Balance: {}", key.pubkey(), Sol(balance));
+
+    Ok(())
 }

@@ -73,7 +73,7 @@ pub fn main() !void {
         }
 
         const stdin_file = std.fs.File.stdin(); // 返回一个 File
-        const s = try countAll(stdin_file);
+        const s = try countAll(allocator, stdin_file, 1024);
 
         if (want_l) try stdout.print("lines: {d}\n", .{s.lines});
         if (want_w) try stdout.print("words: {d}\n", .{s.words});
@@ -87,10 +87,16 @@ pub fn main() !void {
         var had_error = false;
         var files_ok: usize = 0;
         var total = Stats{ .lines = 0, .bytes = 0, .words = 0, .max_line_length = 0, .characters = 0 };
+        const chunk_sizes = [_]usize{ 512, 1024, 4096, 8192, 16384 };
+        var best_time: u64 = 1e10;
+        var best_size: usize = 0;
+        var timer = try std.time.Timer.start();
+
         for (args[i..]) |path| {
             if (std.mem.eql(u8, path, "-")) {
                 const stdin_file = std.fs.File.stdin(); // 返回一个 File
-                const s = try countAll(stdin_file); // 读一次标准输入
+                // set default chunk size
+                const s = try countAll(allocator, stdin_file, 1024); // 读一次标准输入
                 try printLine(stdout, s, path, want_l, want_w, want_c, want_L, want_m);
                 total.lines += s.lines;
                 total.bytes += s.bytes;
@@ -106,7 +112,26 @@ pub fn main() !void {
                 continue;
             };
             defer f.close();
-            const s = try countAll(f);
+
+            var s: Stats = Stats{ .lines = 0, .bytes = 0, .words = 0, .max_line_length = 0, .characters = 0 };
+            for (chunk_sizes) |size| {
+                const start_time = timer.read();
+                s = try countAll(allocator, f, size);
+                const end_time = timer.read();
+                const elapsed_time_ns = end_time - start_time;
+                const elapsed_time_ms = elapsed_time_ns / 1_000_000;
+                if (elapsed_time_ms < best_time) {
+                    best_time = elapsed_time_ms;
+                    best_size = size;
+                }
+                std.debug.print("Chunk size: {} took {} ms\n", .{ size, elapsed_time_ms });
+
+                // set file pointer to beginning
+                try f.seekTo(0);
+            }
+
+            std.debug.print("Best chunk size: {} with {} ms\n", .{ best_size, best_time });
+
             files_ok += 1;
 
             try printLine(stdout, s, path, want_l, want_w, want_c, want_L, want_m);
@@ -173,7 +198,7 @@ pub fn countFromSlice(slice: []const u8) !Stats {
     return Stats{ .lines = lines, .bytes = slice.len, .words = words };
 }
 
-pub fn countAll(file: std.fs.File) !Stats {
+pub fn countAll(allocator: std.mem.Allocator, file: std.fs.File, chunk_size: usize) !Stats {
     var lines: usize = 0;
     var bytes: usize = 0;
     var words: usize = 0;
@@ -181,10 +206,13 @@ pub fn countAll(file: std.fs.File) !Stats {
     var current_line_length: usize = 0;
     var characters: usize = 0;
     var in_word: bool = false;
-    var chunk: [4096]u8 = undefined;
+
+    var chunk: []u8 = try allocator.alloc(u8, chunk_size); // 默认大小
+    defer allocator.free(chunk);
 
     while (true) {
-        const n = try file.read(chunk[0..]);
+        const n = try file.read(chunk[0..chunk_size]);
+
         bytes += n;
 
         if (n == 0) break;
@@ -200,8 +228,9 @@ pub fn countAll(file: std.fs.File) !Stats {
                     max_line_length = current_line_length;
                 }
                 current_line_length = 0;
+            } else {
+                current_line_length += 1;
             }
-            current_line_length += 1;
 
             if (std.ascii.isWhitespace(b)) {
                 if (in_word) {

@@ -15,9 +15,20 @@ pub struct Args {
 #[derive(Subcommand)]
 pub enum Command {
     /// 目前只能使用默认配置文件(～/.config/solana/cli/config.yml)中的账户作为发送账户转移SOL
-    Transfer { to: Pubkey, amount: u64 },
+    Transfer {
+        /// 目标账户的公钥
+        to: Pubkey,
+        /// 转移的SOL数量
+        amount: u64,
+    },
     /// 获取账户的信息
-    Account { address: Pubkey },
+    Account {
+        /// 账户的公钥
+        address: Pubkey,
+    },
     /// 获取账户的SOL的余额
-    Balance { address: Pubkey },
+    Balance {
+        /// 账户的公钥
+        address: Pubkey,
+    },
 }

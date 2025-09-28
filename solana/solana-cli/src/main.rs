@@ -10,6 +10,9 @@ pub mod command;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = Config::load(CONFIG_FILE.as_ref().unwrap())?;
+    println!("Welcome to Solana CLI!");
+    println!("Connect to {}", config.json_rpc_url);
+    println!("Keypair: {}", config.keypair_path);
     let client = RpcClient::new_with_commitment(config.json_rpc_url, CommitmentConfig::confirmed());
 
     let args = command::Args::parse();
@@ -36,6 +39,29 @@ async fn main() -> anyhow::Result<()> {
                 mint_account.to_base58_string()
             );
             command::mint_token::mint_token(&mint_account, &funding_account, &client).await?;
+        }
+        command::Command::TokenAnalysis {
+            mint,
+            api_key,
+            page,
+            page_size,
+            top_holders,
+            top_other_tokens,
+            transfer_limit,
+            holders_only,
+        } => {
+            command::token_analysis::analyze_token(
+                &mint,
+                api_key,
+                page,
+                page_size,
+                top_holders,
+                top_other_tokens,
+                transfer_limit,
+                holders_only,
+                &client,
+            )
+            .await?;
         }
     };
 

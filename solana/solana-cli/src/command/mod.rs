@@ -4,6 +4,7 @@ use solana_sdk::pubkey::Pubkey;
 pub mod accountinfo;
 pub mod balance;
 pub mod mint_token;
+pub mod token_analysis;
 pub mod transfer;
 
 #[derive(Parser)]
@@ -35,4 +36,30 @@ pub enum Command {
     },
     /// 创建一个新账户并初始化为一个代币账户
     MintToken,
+    /// 使用 Helius Rust SDK (RPC) 分析 SPL 代币持有人分布
+    TokenAnalysis {
+        /// 代币铸造地址 (Mint)
+        mint: String,
+        /// Helius API Key，默认读取环境变量 HELIUS_API_KEY
+        #[arg(long, env = "HELIUS_API_KEY")]
+        api_key: Option<String>,
+        /// 请求的分页页码 (默认 1)
+        #[arg(long, default_value_t = 1)]
+        page: u64,
+        /// 每页请求的持有人数量 (默认 100)
+        #[arg(long = "page-size", default_value_t = 100)]
+        page_size: u64,
+        /// 输出前 N 名持有人 (默认 10)
+        #[arg(long = "top-holders", default_value_t = 10)]
+        top_holders: usize,
+        /// 对每位持有人统计的其它代币数量 (默认 5)
+        #[arg(long = "top-other-tokens", default_value_t = 5)]
+        top_other_tokens: usize,
+        /// 展示的交易签名数量 (默认 25，设置为 0 则跳过)
+        #[arg(long = "transfer-limit", default_value_t = 25)]
+        transfer_limit: usize,
+        /// 仅展示持有人清单
+        #[arg(long = "holders-only")]
+        holders_only: bool,
+    },
 }

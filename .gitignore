@@ -2,3 +2,4 @@ zig-out
 .zig-cache
 bigfile.txt
 target
+.DS_Store

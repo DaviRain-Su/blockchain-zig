@@ -4415,6 +4415,8 @@ dependencies = [
  "anyhow",
  "clap 4.5.48",
  "helius",
+ "reqwest 0.12.23",
+ "serde",
  "solana-account 3.0.0",
  "solana-address",
  "solana-cli-config",

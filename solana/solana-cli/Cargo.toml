@@ -7,6 +7,8 @@ edition = "2024"
 anyhow = "1.0.100"
 clap = { version = "4.5.48", features = ["derive", "env"] }
 helius = { version = "0.3.0", default-features = false, features = ["rustls"] }
+serde = { version = "1.0.227", features = ["derive"] }
+reqwest = { version = "0.12.9", default-features = false, features = ["json", "rustls-tls"] }
 solana-account = { version = "3.0.0", features = ["serde"] }
 solana-address = { version = "1.0.0", features = ["decode"] }
 solana-cli-config = "3.0.4"

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, str::FromStr};
+use std::{cmp::Ordering, collections::HashMap, env, str::FromStr};
 
 use anyhow::{Context, Result, anyhow};
 use helius::{
@@ -6,6 +6,8 @@ use helius::{
     rpc_client::RpcClient as HeliusRpcClient,
     types::{Asset, Cluster, GetAsset, GetAssetOptions, GetAssetSignatures, GetTokenAccounts},
 };
+use reqwest::Client;
+use serde::Deserialize;
 use solana_client::nonblocking::rpc_client::RpcClient as SolanaRpcClient;
 use solana_sdk::pubkey::Pubkey;
 use spl_token::{
@@ -14,6 +16,7 @@ use spl_token::{
 };
 
 const DEFAULT_CLUSTER: Cluster = Cluster::MainnetBeta;
+const JUPITER_PRICE_ENDPOINT: &str = "https://price.jup.ag/v4/price";
 
 struct HolderSnapshot {
     token_account: String,
@@ -44,10 +47,11 @@ impl AggregatedHolder {
 
 struct HolderToken {
     mint: String,
-    amount_raw: u64,
     amount_ui: f64,
     decimals: u8,
     metadata: TokenMetadata,
+    price_usd: Option<f64>,
+    value_usd: Option<f64>,
 }
 
 #[derive(Clone, Default)]
@@ -55,6 +59,7 @@ struct TokenMetadata {
     name: Option<String>,
     symbol: Option<String>,
     decimals: Option<u8>,
+    price_usd: Option<f64>,
 }
 
 impl TokenMetadata {
@@ -74,6 +79,72 @@ impl TokenMetadata {
         }
         fallback.to_string()
     }
+}
+
+impl PriceFetcher {
+    fn new() -> Result<Self> {
+        let client = Client::builder()
+            .user_agent("solana-cli-jupiter-price")
+            .build()
+            .context("初始化 Jupiter HTTP 客户端失败")?;
+        Ok(Self {
+            client,
+            cache: HashMap::new(),
+        })
+    }
+
+    async fn get_price(&mut self, mint: &str) -> Result<Option<f64>> {
+        if let Some(cached) = self.cache.get(mint) {
+            return Ok(*cached);
+        }
+
+        let url = format!("{}?ids={}", JUPITER_PRICE_ENDPOINT, mint);
+        let response = self.client.get(&url).send().await;
+
+        let price = match response {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    let payload: JupiterPriceResponse = resp
+                        .json()
+                        .await
+                        .context("解析 Jupiter price 响应失败")?;
+                    payload
+                        .data
+                        .get(mint)
+                        .and_then(|entry| entry.price)
+                } else {
+                    None
+                }
+            }
+            Err(err) => {
+                println!(
+                    "    › Jupiter price 请求失败 ({}): {}",
+                    mint, err
+                );
+                None
+            }
+        };
+
+        self.cache.insert(mint.to_string(), price);
+        Ok(price)
+    }
+}
+
+struct PriceFetcher {
+    client: Client,
+    cache: HashMap<String, Option<f64>>,
+}
+
+#[derive(Deserialize)]
+struct JupiterPriceResponse {
+    #[serde(default)]
+    data: HashMap<String, JupiterPriceEntry>,
+}
+
+#[derive(Deserialize)]
+struct JupiterPriceEntry {
+    #[serde(default)]
+    price: Option<f64>,
 }
 
 /// 使用 Helius Rust SDK (RPC) 分析指定 SPL 代币
@@ -101,6 +172,7 @@ pub async fn analyze_token(
     let mut metadata_cache: HashMap<String, TokenMetadata> = HashMap::new();
     let mut decimals_cache = HashMap::new();
     decimals_cache.insert(mint.to_string(), decimals);
+    let mut price_fetcher = PriceFetcher::new()?;
 
     let mint_metadata =
         match get_or_fetch_metadata(mint, &mut metadata_cache, helius_rpc.as_ref()).await {
@@ -231,6 +303,7 @@ pub async fn analyze_token(
             &holder.owner,
             mint,
             top_other_tokens,
+            &mut price_fetcher,
             &mut decimals_cache,
             &mut metadata_cache,
             solana_rpc,
@@ -252,9 +325,17 @@ pub async fn analyze_token(
         println!("- {} 还持有:", holder.owner);
         for token in others {
             let token_label = token.metadata.label(&token.mint);
+            let price_info = token
+                .price_usd
+                .map(|p| format!("价格: ${:.6}", p))
+                .unwrap_or_else(|| "价格: 未知".to_string());
+            let value_info = token
+                .value_usd
+                .map(|v| format!("≈ ${:.2}", v))
+                .unwrap_or_else(|| "≈ $-".to_string());
             println!(
-                "    - {} ({}) : {:.6} 枚 (精度: {})",
-                token_label, token.mint, token.amount_ui, token.decimals
+                "    - {} ({}) : {:.6} 枚 (精度: {}) [{} | {}]",
+                token_label, token.mint, token.amount_ui, token.decimals, price_info, value_info
             );
         }
     }
@@ -341,6 +422,7 @@ async fn fetch_owner_top_tokens(
     owner: &str,
     skip_mint: &str,
     limit: usize,
+    price_fetcher: &mut PriceFetcher,
     decimals_cache: &mut HashMap<String, u8>,
     metadata_cache: &mut HashMap<String, TokenMetadata>,
     solana_rpc: &SolanaRpcClient,
@@ -377,22 +459,48 @@ async fn fetch_owner_top_tokens(
                 continue;
             }
         };
-        let metadata = get_or_fetch_metadata(&mint, metadata_cache, helius_rpc)
+
+        let mut metadata = get_or_fetch_metadata(&mint, metadata_cache, helius_rpc)
             .await
             .unwrap_or_default();
         if let Some(meta_decimals) = metadata.decimals {
             decimals_cache.entry(mint.clone()).or_insert(meta_decimals);
         }
+
+        let price_usd = match metadata.price_usd {
+            Some(price) => Some(price),
+            None => price_fetcher.get_price(&mint).await?,
+        };
+
+        let price_usd = match price_usd {
+            Some(price) => {
+                metadata.price_usd = Some(price);
+                metadata_cache.insert(mint.clone(), metadata.clone());
+                price
+            }
+            None => {
+                println!("    › {} 暂无 Jupiter 报价，已跳过", mint);
+                continue;
+            }
+        };
+
+        let amount_ui = ui_amount(amount_raw, decimals);
         tokens.push(HolderToken {
             mint,
-            amount_raw,
-            amount_ui: ui_amount(amount_raw, decimals),
+            amount_ui,
             decimals,
             metadata,
+            price_usd: Some(price_usd),
+            value_usd: Some(price_usd * amount_ui),
         });
     }
 
-    tokens.sort_by(|a, b| b.amount_raw.cmp(&a.amount_raw));
+    tokens.sort_by(|a, b| {
+        b.value_usd
+            .unwrap_or(0.0)
+            .partial_cmp(&a.value_usd.unwrap_or(0.0))
+            .unwrap_or(Ordering::Equal)
+    });
     tokens.truncate(limit);
 
     Ok(tokens)
@@ -475,11 +583,17 @@ fn token_metadata_from_asset(asset: Asset) -> TokenMetadata {
                 None
             }
         });
+    let price_usd = asset
+        .token_info
+        .as_ref()
+        .and_then(|info| info.price_info.as_ref())
+        .map(|info| info.price_per_token as f64);
 
     TokenMetadata {
         name,
         symbol,
         decimals,
+        price_usd,
     }
 }
 

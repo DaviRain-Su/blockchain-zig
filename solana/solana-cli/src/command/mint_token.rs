@@ -1,7 +1,6 @@
 use std::str::FromStr;
 
 use solana_client::nonblocking::rpc_client::RpcClient;
-use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::signature::Keypair;
@@ -11,13 +10,13 @@ use solana_system_interface::instruction as system_instruction;
 use spl_token::solana_program::program_pack::Pack;
 use spl_token::{ID as TOKEN_PROGRAM_ID, instruction::initialize_mint2, state::Mint};
 
-pub async fn mint_token(mint_account: &Keypair, funding_account: &Keypair) -> anyhow::Result<()> {
-    let client = RpcClient::new_with_commitment(
-        "http://localhost:8899".to_string(),
-        CommitmentConfig::confirmed(),
-    );
+pub async fn mint_token(
+    mint_account: &Keypair,
+    funding_account: &Keypair,
+    rpc_client: &RpcClient,
+) -> anyhow::Result<()> {
     let mint_account_len = Mint::LEN;
-    let mint_account_rent = client
+    let mint_account_rent = rpc_client
         .get_minimum_balance_for_rent_exemption(mint_account_len)
         .await?;
     let token_program_id = Pubkey::from_str(&TOKEN_PROGRAM_ID.to_string()).unwrap();
@@ -58,10 +57,10 @@ pub async fn mint_token(mint_account: &Keypair, funding_account: &Keypair) -> an
 
     transaction.sign(
         &[&funding_account, &mint_account],
-        client.get_latest_blockhash().await?,
+        rpc_client.get_latest_blockhash().await?,
     );
 
-    match client.send_and_confirm_transaction(&transaction).await {
+    match rpc_client.send_and_confirm_transaction(&transaction).await {
         Ok(signature) => println!("Transaction Signature: {}", signature),
         Err(err) => eprintln!("Error sending transaction: {}", err),
     }

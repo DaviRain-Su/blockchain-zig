@@ -123,7 +123,7 @@ pub fn main() !void {
             var s: Stats = undefined;
 
             if (enable_benchmarking) {
-                const bench = try benchmarkChunkSizes(allocator, &f, chunk_size_candidates);
+                const bench = try benchmarkChunkSizes(allocator, &f, &chunk_size_candidates);
                 std.debug.print(
                     "Best chunk size: {} with {} ms (timer) / {} ms (timestamp)\n",
                     .{

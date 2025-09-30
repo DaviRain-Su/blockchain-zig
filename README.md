@@ -14,8 +14,12 @@
 ## Project Layout
 - `src/main.zig` – CLI entry point that parses flags, handles I/O, and prints results.
 - `src/root.zig` – Library exports (`Stats`, `Counter`, helpers) plus comprehensive unit tests.
-- `build.zig` – Build graph defining the library module, executable, and test steps.
+- `build.zig` / `build.zig.zon` – Build configuration and dependency manifest.
 - `changes/` – Markdown summaries of significant iterations (e.g., `changes/2025-09-30-preserve-chunk-counting-state.md`).
+- `solana/` – Companion Rust tooling:
+  - `solana/docs/` – Notes on Solana accounts (both Chinese and English).
+  - `solana/solana-cli/` – Experimental Rust CLI with its own `Cargo` project.
+- `zig-out/` – Build artifacts (`zig-out/bin/blockchain_zig` after `zig build`).
 
 ## Build & Run
 - Build and install locally: `zig build`

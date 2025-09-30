@@ -2,6 +2,8 @@ const std = @import("std");
 const blockchain_zig = @import("blockchain_zig");
 const Stats = blockchain_zig.Stats;
 const Counter = blockchain_zig.Counter;
+const builtin = @import("builtin");
+const enable_benchmarking = builtin.mode == .Debug;
 
 var stdout_buffer: [1024]u8 = undefined;
 var stderr_buffer: [1024]u8 = undefined;
@@ -90,7 +92,6 @@ pub fn main() !void {
         var files_ok: usize = 0;
         var total = Stats{ .lines = 0, .bytes = 0, .words = 0, .max_line_length = 0, .characters = 0 };
         const chunk_sizes = [_]usize{ 512, 1024, 4096, 8192, 16384 };
-        var timer = try std.time.Timer.start();
 
         for (args[i..]) |path| {
             if (std.mem.eql(u8, path, "-")) {
@@ -117,32 +118,38 @@ pub fn main() !void {
             };
             defer f.close();
 
-            var s: Stats = Stats{ .lines = 0, .bytes = 0, .words = 0, .max_line_length = 0, .characters = 0 };
-            var best_time: u64 = std.math.maxInt(u64);
-            var best_size: usize = chunk_sizes[0];
+            var s: Stats = undefined;
 
-            for (chunk_sizes) |size| {
-                timer.reset();
-                const start_time = timer.read();
-                s = try countAll(allocator, f, size);
-                const end_time = timer.read();
-                const elapsed_time_ns = end_time - start_time;
-                const elapsed_time_ms = elapsed_time_ns / 1_000_000;
-                if (elapsed_time_ms < best_time) {
-                    best_time = elapsed_time_ms;
-                    best_size = size;
+            if (enable_benchmarking) {
+                var timer = try std.time.Timer.start();
+                var best_time_ns: u64 = std.math.maxInt(u64);
+                var best_size: usize = chunk_sizes[0];
+
+                for (chunk_sizes) |size| {
+                    timer.reset();
+                    s = try countAll(allocator, f, size);
+                    const elapsed_time_ns = timer.read();
+                    if (elapsed_time_ns < best_time_ns) {
+                        best_time_ns = elapsed_time_ns;
+                        best_size = size;
+                    }
+                    const elapsed_time_ms = elapsed_time_ns / 1_000_000;
+                    std.debug.print("Chunk size: {} took {} ms\n", .{ size, elapsed_time_ms });
+
+                    // set file pointer to beginning
+                    try f.seekTo(0);
                 }
-                std.debug.print("Chunk size: {} took {} ms\n", .{ size, elapsed_time_ms });
 
-                // set file pointer to beginning
-                try f.seekTo(0);
-            }
+                const best_time_ms = best_time_ns / 1_000_000;
+                std.debug.print("Best chunk size: {} with {} ms\n", .{ best_size, best_time_ms });
 
-            std.debug.print("Best chunk size: {} with {} ms\n", .{ best_size, best_time });
-
-            if (best_size != chunk_sizes[chunk_sizes.len - 1]) {
-                try f.seekTo(0);
-                s = try countAll(allocator, f, best_size);
+                if (best_size != chunk_sizes[chunk_sizes.len - 1]) {
+                    try f.seekTo(0);
+                    s = try countAll(allocator, f, best_size);
+                }
+            } else {
+                const default_chunk_size = chunk_sizes[chunk_sizes.len - 1];
+                s = try countAll(allocator, f, default_chunk_size);
             }
 
             files_ok += 1;

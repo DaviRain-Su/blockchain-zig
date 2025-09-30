@@ -8,56 +8,66 @@ pub const Stats = struct {
     characters: usize, // 字符统计
 };
 
+pub const Counter = struct {
+    stats: Stats = .{
+        .lines = 0,
+        .bytes = 0,
+        .words = 0,
+        .max_line_length = 0,
+        .characters = 0,
+    },
+    current_line_length: usize = 0,
+    in_word: bool = false,
+
+    pub fn init() Counter {
+        return Counter{};
+    }
+
+    pub fn process(self: *Counter, slice: []const u8) void {
+        self.stats.bytes += slice.len;
+
+        for (slice) |b| {
+            if (!isUtf8Continuation(b)) {
+                self.stats.characters += 1;
+            }
+
+            if (b == '\n') {
+                self.stats.lines += 1;
+                if (self.current_line_length > self.stats.max_line_length) {
+                    self.stats.max_line_length = self.current_line_length;
+                }
+                self.current_line_length = 0;
+            } else {
+                self.current_line_length += 1;
+            }
+
+            if (std.ascii.isWhitespace(b)) {
+                if (self.in_word) {
+                    self.stats.words += 1;
+                    self.in_word = false;
+                }
+            } else if (!self.in_word) {
+                self.in_word = true;
+            }
+        }
+    }
+
+    pub fn finish(self: *Counter) void {
+        if (self.current_line_length > self.stats.max_line_length) {
+            self.stats.max_line_length = self.current_line_length;
+        }
+        if (self.in_word) {
+            self.stats.words += 1;
+            self.in_word = false;
+        }
+    }
+};
+
 pub fn countFromSlice(slice: []const u8) !Stats {
-    var lines: usize = 0;
-    var words: usize = 0;
-    var max_line_length: usize = 0;
-    var current_line_length: usize = 0;
-    var characters: usize = 0;
-    var in_word: bool = false;
-
-    for (slice) |b| {
-        if (!isUtf8Continuation(b)) {
-            characters += 1;
-        }
-        if (b == '\n') {
-            lines += 1;
-            // 更新最大行长度
-            if (current_line_length > max_line_length) {
-                max_line_length = current_line_length;
-            }
-            current_line_length = 0;
-        } else {
-            current_line_length += 1;
-        }
-
-        if (std.ascii.isWhitespace(b)) {
-            if (in_word) {
-                words += 1;
-                in_word = false;
-            }
-        } else {
-            if (!in_word) {
-                in_word = true;
-            }
-        }
-    }
-
-    // 结尾行处理（文件没有换行符时）
-    if (current_line_length > max_line_length) {
-        max_line_length = current_line_length;
-    }
-    // 你现在是在遇到空白时给 words += 1。如果文件结尾处没有空白（例如内容是 "abc" 没有换行/空格），
-    // 循环退出前 in_word 还在 true，但循环结束后没有再加 1，导致漏计最后一个词。
-    if (in_word) words += 1;
-
-    return Stats{
-        .lines = lines,
-        .bytes = slice.len,
-        .words = words,
-        .max_line_length = max_line_length,
-        .characters = characters,
-    };
+    var counter = Counter.init();
+    counter.process(slice);
+    counter.finish();
+    return counter.stats;
 }
 
 //统计 UTF-8 的“起始字节”数量。UTF-8 的续字节满足 (b & 0b1100_0000) == 0b1000_0000，
@@ -69,48 +79,112 @@ pub inline fn isUtf8Continuation(b: u8) bool {
 
 test "countAll basic" {
     const s = try countFromSlice("a\nb c\n");
-    std.debug.print("Lines: {}, Words: {}, Bytes: {}\n", .{ s.lines, s.words, s.bytes });
+    std.debug.print(
+        "Lines: {}, Words: {}, Bytes: {}, Characters: {}, Max line: {}\n",
+        .{ s.lines, s.words, s.bytes, s.characters, s.max_line_length },
+    );
     try std.testing.expectEqual(@as(usize, 2), s.lines);
     try std.testing.expectEqual(@as(usize, 3), s.words);
     try std.testing.expectEqual(@as(usize, 6), s.bytes);
+    try std.testing.expectEqual(@as(usize, 6), s.characters);
+    try std.testing.expectEqual(@as(usize, 3), s.max_line_length);
 }
 
 test "countFromSlice: trailing EOF word" {
     const s = try countFromSlice("abc");
-    std.debug.print("Lines: {}, Words: {}, Bytes: {}\n", .{ s.lines, s.words, s.bytes });
+    std.debug.print(
+        "Lines: {}, Words: {}, Bytes: {}, Characters: {}, Max line: {}\n",
+        .{ s.lines, s.words, s.bytes, s.characters, s.max_line_length },
+    );
     try std.testing.expectEqual(@as(usize, 0), s.lines);
     try std.testing.expectEqual(@as(usize, 1), s.words);
     try std.testing.expectEqual(@as(usize, 3), s.bytes);
+    try std.testing.expectEqual(@as(usize, 3), s.characters);
+    try std.testing.expectEqual(@as(usize, 3), s.max_line_length);
 }
 
 test "countFromSlice: ' a\n\nb' " {
     const s = try countFromSlice(" a\n\nb");
-    std.debug.print("Lines: {}, Words: {}, Bytes: {}\n", .{ s.lines, s.words, s.bytes });
+    std.debug.print(
+        "Lines: {}, Words: {}, Bytes: {}, Characters: {}, Max line: {}\n",
+        .{ s.lines, s.words, s.bytes, s.characters, s.max_line_length },
+    );
     try std.testing.expectEqual(@as(usize, 2), s.lines);
     try std.testing.expectEqual(@as(usize, 2), s.words);
     try std.testing.expectEqual(@as(usize, 5), s.bytes);
+    try std.testing.expectEqual(@as(usize, 5), s.characters);
+    try std.testing.expectEqual(@as(usize, 2), s.max_line_length);
 }
 
 test "countFromSlice: empty " {
     const s = try countFromSlice("");
-    std.debug.print("Lines: {}, Words: {}, Bytes: {}\n", .{ s.lines, s.words, s.bytes });
+    std.debug.print(
+        "Lines: {}, Words: {}, Bytes: {}, Characters: {}, Max line: {}\n",
+        .{ s.lines, s.words, s.bytes, s.characters, s.max_line_length },
+    );
     try std.testing.expectEqual(@as(usize, 0), s.lines);
     try std.testing.expectEqual(@as(usize, 0), s.words);
     try std.testing.expectEqual(@as(usize, 0), s.bytes);
+    try std.testing.expectEqual(@as(usize, 0), s.characters);
+    try std.testing.expectEqual(@as(usize, 0), s.max_line_length);
 }
 
 test "countFromSlice: `a \tb\n` " {
     const s = try countFromSlice("a \tb\n");
-    std.debug.print("Lines: {}, Words: {}, Bytes: {}\n", .{ s.lines, s.words, s.bytes });
+    std.debug.print(
+        "Lines: {}, Words: {}, Bytes: {}, Characters: {}, Max line: {}\n",
+        .{ s.lines, s.words, s.bytes, s.characters, s.max_line_length },
+    );
     try std.testing.expectEqual(@as(usize, 1), s.lines);
     try std.testing.expectEqual(@as(usize, 2), s.words);
     try std.testing.expectEqual(@as(usize, 5), s.bytes);
+    try std.testing.expectEqual(@as(usize, 5), s.characters);
+    try std.testing.expectEqual(@as(usize, 4), s.max_line_length);
 }
 
 test "countFromSlice: `a\r\nb\r\n` " {
     const s = try countFromSlice("a\r\nb\r\n");
-    std.debug.print("Lines: {}, Words: {}, Bytes: {}\n", .{ s.lines, s.words, s.bytes });
+    std.debug.print(
+        "Lines: {}, Words: {}, Bytes: {}, Characters: {}, Max line: {}\n",
+        .{ s.lines, s.words, s.bytes, s.characters, s.max_line_length },
+    );
     try std.testing.expectEqual(@as(usize, 2), s.lines);
     try std.testing.expectEqual(@as(usize, 2), s.words);
     try std.testing.expectEqual(@as(usize, 6), s.bytes);
+    try std.testing.expectEqual(@as(usize, 6), s.characters);
+    try std.testing.expectEqual(@as(usize, 2), s.max_line_length);
+}
+
+test "counter keeps state across chunks" {
+    var counter = Counter.init();
+    counter.process("foo");
+    counter.process("bar baz");
+    counter.finish();
+    try std.testing.expectEqual(@as(usize, 0), counter.stats.lines);
+    try std.testing.expectEqual(@as(usize, 2), counter.stats.words);
+    try std.testing.expectEqual(@as(usize, 10), counter.stats.bytes);
+    try std.testing.expectEqual(@as(usize, 10), counter.stats.characters);
+    try std.testing.expectEqual(@as(usize, 10), counter.stats.max_line_length);
+}
+
+test "counter tracks long line across chunks" {
+    var counter = Counter.init();
+    counter.process("aaaaaaaa");
+    counter.process("aaaaaaaa\n");
+    counter.finish();
+    try std.testing.expectEqual(@as(usize, 1), counter.stats.lines);
+    try std.testing.expectEqual(@as(usize, 1), counter.stats.words);
+    try std.testing.expectEqual(@as(usize, 17), counter.stats.bytes);
+    try std.testing.expectEqual(@as(usize, 17), counter.stats.characters);
+    try std.testing.expectEqual(@as(usize, 16), counter.stats.max_line_length);
+}
+
+test "countFromSlice counts utf8 characters" {
+    const sample = "\xe4\xbd\xa0\xe5\xa5\xbd\n"; // "你好\n"
+    const s = try countFromSlice(sample);
+    try std.testing.expectEqual(@as(usize, 1), s.lines);
+    try std.testing.expectEqual(@as(usize, 1), s.words);
+    try std.testing.expectEqual(@as(usize, 7), s.bytes);
+    try std.testing.expectEqual(@as(usize, 3), s.characters);
+    try std.testing.expectEqual(@as(usize, 6), s.max_line_length);
 }

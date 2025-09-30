@@ -1,8 +1,7 @@
 const std = @import("std");
 const blockchain_zig = @import("blockchain_zig");
 const Stats = blockchain_zig.Stats;
-const isUtf8Continuation = blockchain_zig.isUtf8Continuation;
-const countFromSlice = blockchain_zig.countFromSlice;
+const Counter = blockchain_zig.Counter;
 
 var stdout_buffer: [1024]u8 = undefined;
 var stderr_buffer: [1024]u8 = undefined;
@@ -168,33 +167,16 @@ fn printLine(w: anytype, s: Stats, name: ?[]const u8, want_l: bool, want_w: bool
 }
 
 pub fn countAll(allocator: std.mem.Allocator, file: std.fs.File, chunk_size: usize) !Stats {
-    var lines: usize = 0;
-    var bytes: usize = 0;
-    var words: usize = 0;
-    var max_line_length: usize = 0;
-    var characters: usize = 0;
-
-    var chunk: []u8 = try allocator.alloc(u8, chunk_size); // 默认大小
-
+    var counter = Counter.init();
+    var chunk: []u8 = try allocator.alloc(u8, chunk_size);
     defer allocator.free(chunk);
 
     while (true) {
         const n = try file.read(chunk[0..chunk_size]);
-        bytes += n;
         if (n == 0) break;
-        const result = try countFromSlice(chunk[0..n]);
-        max_line_length = @max(max_line_length, result.max_line_length);
-
-        characters += result.characters;
-        lines += result.lines;
-        words += result.words;
+        counter.process(chunk[0..n]);
     }
 
-    return Stats{
-        .lines = lines,
-        .bytes = bytes,
-        .words = words,
-        .max_line_length = max_line_length,
-        .characters = characters,
-    };
+    counter.finish();
+    return counter.stats;
 }

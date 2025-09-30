@@ -5,6 +5,11 @@ const Counter = blockchain_zig.Counter;
 const builtin = @import("builtin");
 const enable_benchmarking = builtin.mode == .Debug;
 
+const CliError = error{
+    OpenFailed,
+    BenchmarkFailed,
+};
+
 const chunk_size_candidates = [_]usize{ 512, 1024, 4_096, 8_192, 16_384 };
 const default_chunk_size = chunk_size_candidates[chunk_size_candidates.len - 1];
 
@@ -112,30 +117,11 @@ pub fn main() !void {
                 continue;
             }
 
-            var f = std.fs.cwd().openFile(path, .{ .mode = .read_only }) catch |e| {
-                try stderr.print("{s}: {s}\n", .{ path, @errorName(e) });
-                try stderr.flush();
+            const s = processPath(allocator, path) catch |err| {
                 had_error = true;
+                try reportPathError(path, err);
                 continue;
             };
-            defer f.close();
-
-            var s: Stats = undefined;
-
-            if (enable_benchmarking) {
-                const bench = try benchmarkChunkSizes(allocator, &f, &chunk_size_candidates);
-                std.debug.print(
-                    "Best chunk size: {} with {} ms (timer) / {} ms (timestamp)\n",
-                    .{
-                        bench.best_size,
-                        bench.best_time_ns_timer / 1_000_000,
-                        bench.best_time_ns_timestamp / 1_000_000,
-                    },
-                );
-                s = bench.stats;
-            } else {
-                s = try countAll(allocator, f, default_chunk_size);
-            }
 
             files_ok += 1;
 
@@ -216,14 +202,7 @@ fn benchmarkChunkSizes(allocator: std.mem.Allocator, file: *std.fs.File, chunk_s
         const end_timestamp = std.time.nanoTimestamp();
         const elapsed_timestamp_ns = @as(u64, @intCast(end_timestamp - start_timestamp));
 
-        std.debug.print(
-            "Chunk size: {} took {} ms (timer) / {} ms (timestamp)\n",
-            .{
-                size,
-                @divTrunc(elapsed_timer_ns, 1_000_000),
-                @divTrunc(elapsed_timestamp_ns, 1_000_000),
-            },
-        );
+        try logBenchmarkSample(size, elapsed_timer_ns, elapsed_timestamp_ns);
 
         const effective_ns = @min(elapsed_timer_ns, elapsed_timestamp_ns);
         const best_effective_ns = @min(outcome.best_time_ns_timer, outcome.best_time_ns_timestamp);
@@ -236,6 +215,54 @@ fn benchmarkChunkSizes(allocator: std.mem.Allocator, file: *std.fs.File, chunk_s
     }
 
     return outcome;
+}
+
+fn logBenchmarkSample(size: usize, timer_ns: u64, timestamp_ns: u64) CliError!void {
+    stderr.print(
+        "Chunk size: {} took {} ms (timer) / {} ms (timestamp)\n",
+        .{ size, @divTrunc(timer_ns, 1_000_000), @divTrunc(timestamp_ns, 1_000_000) },
+    ) catch {
+        return error.BenchmarkFailed;
+    };
+}
+
+fn logBenchmarkSummary(outcome: BenchmarkOutcome) CliError!void {
+    stderr.print(
+        "Best chunk size: {} with {} ms (timer) / {} ms (timestamp)\n",
+        .{
+            outcome.best_size,
+            @divTrunc(outcome.best_time_ns_timer, 1_000_000),
+            @divTrunc(outcome.best_time_ns_timestamp, 1_000_000),
+        },
+    ) catch {
+        return error.BenchmarkFailed;
+    };
+}
+
+fn processPath(allocator: std.mem.Allocator, path: []const u8) !Stats {
+    var file = std.fs.cwd().openFile(path, .{ .mode = .read_only }) catch {
+        return error.OpenFailed;
+    };
+    defer file.close();
+
+    if (enable_benchmarking) {
+        const outcome = try benchmarkChunkSizes(allocator, &file, chunk_size_candidates);
+        try logBenchmarkSummary(outcome);
+        return outcome.stats;
+    }
+
+    return try countAll(allocator, file, default_chunk_size);
+}
+
+fn reportPathError(path: []const u8, err: anyerror) !void {
+    const message = switch (err) {
+        error.OpenFailed => "failed to open input",
+        error.BenchmarkFailed => "failed to log benchmark output",
+        error.NoChunkSizes => "no chunk sizes configured",
+        else => @errorName(err),
+    };
+    try stderr.print("{s}: {s}\n", .{ path, message });
+    try stderr.flush();
 }
 
 test "printLine includes max line and characters" {

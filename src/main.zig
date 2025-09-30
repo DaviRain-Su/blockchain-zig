@@ -1,6 +1,8 @@
 const std = @import("std");
 const blockchain_zig = @import("blockchain_zig");
 const Stats = blockchain_zig.Stats;
+const isUtf8Continuation = blockchain_zig.isUtf8Continuation;
+const countFromSlice = blockchain_zig.countFromSlice;
 
 var stdout_buffer: [1024]u8 = undefined;
 var stderr_buffer: [1024]u8 = undefined;
@@ -170,55 +172,23 @@ pub fn countAll(allocator: std.mem.Allocator, file: std.fs.File, chunk_size: usi
     var bytes: usize = 0;
     var words: usize = 0;
     var max_line_length: usize = 0;
-    var current_line_length: usize = 0;
     var characters: usize = 0;
-    var in_word: bool = false;
 
     var chunk: []u8 = try allocator.alloc(u8, chunk_size); // 默认大小
+
     defer allocator.free(chunk);
 
     while (true) {
         const n = try file.read(chunk[0..chunk_size]);
-
         bytes += n;
-
         if (n == 0) break;
+        const result = try countFromSlice(chunk[0..n]);
+        max_line_length = @max(max_line_length, result.max_line_length);
 
-        for (chunk[0..n]) |b| {
-            if (!isUtf8Continuation(b)) {
-                characters += 1;
-            }
-            if (b == '\n') {
-                lines += 1;
-                // 更新最大行长度
-                if (current_line_length > max_line_length) {
-                    max_line_length = current_line_length;
-                }
-                current_line_length = 0;
-            } else {
-                current_line_length += 1;
-            }
-
-            if (std.ascii.isWhitespace(b)) {
-                if (in_word) {
-                    words += 1;
-                    in_word = false;
-                }
-            } else {
-                if (!in_word) {
-                    in_word = true;
-                }
-            }
-        }
+        characters += result.characters;
+        lines += result.lines;
+        words += result.words;
     }
-
-    // 结尾行处理（文件没有换行符时）
-    if (current_line_length > max_line_length) {
-        max_line_length = current_line_length;
-    }
-    // 你现在是在遇到空白时给 words += 1。如果文件结尾处没有空白（例如内容是 "abc" 没有换行/空格），
-    // 循环退出前 in_word 还在 true，但循环结束后没有再加 1，导致漏计最后一个词。
-    if (in_word) words += 1;
 
     return Stats{
         .lines = lines,
@@ -227,11 +197,4 @@ pub fn countAll(allocator: std.mem.Allocator, file: std.fs.File, chunk_size: usi
         .max_line_length = max_line_length,
         .characters = characters,
     };
-}
-
-//统计 UTF-8 的“起始字节”数量。UTF-8 的续字节满足 (b & 0b1100_0000) == 0b1000_0000，
-// 所以每遇到一个“不是续字节”的字节就 +1，得到的就是字符数（假设输入是有效 UTF-8）。
-// 这个方法天然支持跨块，无需状态机。
-inline fn isUtf8Continuation(b: u8) bool {
-    return (b & 0b1100_0000) == 0b1000_0000;
 }

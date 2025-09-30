@@ -246,7 +246,7 @@ fn processPath(allocator: std.mem.Allocator, path: []const u8) !Stats {
     defer file.close();
 
     if (enable_benchmarking) {
-        const outcome = try benchmarkChunkSizes(allocator, &file, chunk_size_candidates);
+        const outcome = try benchmarkChunkSizes(allocator, &file, &chunk_size_candidates);
         try logBenchmarkSummary(outcome);
         return outcome.stats;
     }

@@ -90,8 +90,6 @@ pub fn main() !void {
         var files_ok: usize = 0;
         var total = Stats{ .lines = 0, .bytes = 0, .words = 0, .max_line_length = 0, .characters = 0 };
         const chunk_sizes = [_]usize{ 512, 1024, 4096, 8192, 16384 };
-        var best_time: u64 = 1e10;
-        var best_size: usize = 0;
         var timer = try std.time.Timer.start();
 
         for (args[i..]) |path| {
@@ -103,6 +101,10 @@ pub fn main() !void {
                 total.lines += s.lines;
                 total.bytes += s.bytes;
                 total.words += s.words;
+                total.characters += s.characters;
+                if (s.max_line_length > total.max_line_length) {
+                    total.max_line_length = s.max_line_length;
+                }
                 files_ok += 1;
                 continue;
             }
@@ -116,7 +118,11 @@ pub fn main() !void {
             defer f.close();
 
             var s: Stats = Stats{ .lines = 0, .bytes = 0, .words = 0, .max_line_length = 0, .characters = 0 };
+            var best_time: u64 = std.math.maxInt(u64);
+            var best_size: usize = chunk_sizes[0];
+
             for (chunk_sizes) |size| {
+                timer.reset();
                 const start_time = timer.read();
                 s = try countAll(allocator, f, size);
                 const end_time = timer.read();
@@ -134,6 +140,11 @@ pub fn main() !void {
 
             std.debug.print("Best chunk size: {} with {} ms\n", .{ best_size, best_time });
 
+            if (best_size != chunk_sizes[chunk_sizes.len - 1]) {
+                try f.seekTo(0);
+                s = try countAll(allocator, f, best_size);
+            }
+
             files_ok += 1;
 
             try printLine(stdout, s, path, want_l, want_w, want_c, want_L, want_m);
@@ -141,6 +152,9 @@ pub fn main() !void {
             total.bytes += s.bytes;
             total.words += s.words;
             total.characters += s.characters;
+            if (s.max_line_length > total.max_line_length) {
+                total.max_line_length = s.max_line_length;
+            }
             try stdout.print("************************************\n", .{});
         }
 
@@ -149,6 +163,7 @@ pub fn main() !void {
             if (want_w) try stdout.print("words: {d} ", .{total.words});
             if (want_c) try stdout.print("bytes: {d} ", .{total.bytes});
             if (want_m) try stdout.print("characters: {d} ", .{total.characters});
+            if (want_L) try stdout.print("max line length: {d} ", .{total.max_line_length});
             try stdout.print("total\n", .{});
         }
         try stdout.flush();

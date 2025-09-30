@@ -5,6 +5,9 @@ const Counter = blockchain_zig.Counter;
 const builtin = @import("builtin");
 const enable_benchmarking = builtin.mode == .Debug;
 
+const chunk_size_candidates = [_]usize{ 512, 1024, 4_096, 8_192, 16_384 };
+const default_chunk_size = chunk_size_candidates[chunk_size_candidates.len - 1];
+
 var stdout_buffer: [1024]u8 = undefined;
 var stderr_buffer: [1024]u8 = undefined;
 // stdout
@@ -77,7 +80,7 @@ pub fn main() !void {
         }
 
         const stdin_file = std.fs.File.stdin(); // 返回一个 File
-        const s = try countAll(allocator, stdin_file, 1024);
+        const s = try countAll(allocator, stdin_file, default_chunk_size);
 
         if (want_l) try stdout.print("lines: {d}\n", .{s.lines});
         if (want_w) try stdout.print("words: {d}\n", .{s.words});
@@ -91,13 +94,12 @@ pub fn main() !void {
         var had_error = false;
         var files_ok: usize = 0;
         var total = Stats{ .lines = 0, .bytes = 0, .words = 0, .max_line_length = 0, .characters = 0 };
-        const chunk_sizes = [_]usize{ 512, 1024, 4096, 8192, 16384 };
 
         for (args[i..]) |path| {
             if (std.mem.eql(u8, path, "-")) {
                 const stdin_file = std.fs.File.stdin(); // 返回一个 File
                 // set default chunk size
-                const s = try countAll(allocator, stdin_file, 1024); // 读一次标准输入
+                const s = try countAll(allocator, stdin_file, default_chunk_size); // 读一次标准输入
                 try printLine(stdout, s, path, want_l, want_w, want_c, want_L, want_m);
                 total.lines += s.lines;
                 total.bytes += s.bytes;
@@ -121,34 +123,17 @@ pub fn main() !void {
             var s: Stats = undefined;
 
             if (enable_benchmarking) {
-                var timer = try std.time.Timer.start();
-                var best_time_ns: u64 = std.math.maxInt(u64);
-                var best_size: usize = chunk_sizes[0];
-
-                for (chunk_sizes) |size| {
-                    timer.reset();
-                    s = try countAll(allocator, f, size);
-                    const elapsed_time_ns = timer.read();
-                    if (elapsed_time_ns < best_time_ns) {
-                        best_time_ns = elapsed_time_ns;
-                        best_size = size;
-                    }
-                    const elapsed_time_ms = elapsed_time_ns / 1_000_000;
-                    std.debug.print("Chunk size: {} took {} ms\n", .{ size, elapsed_time_ms });
-
-                    // set file pointer to beginning
-                    try f.seekTo(0);
-                }
-
-                const best_time_ms = best_time_ns / 1_000_000;
-                std.debug.print("Best chunk size: {} with {} ms\n", .{ best_size, best_time_ms });
-
-                if (best_size != chunk_sizes[chunk_sizes.len - 1]) {
-                    try f.seekTo(0);
-                    s = try countAll(allocator, f, best_size);
-                }
+                const bench = try benchmarkChunkSizes(allocator, &f, chunk_size_candidates);
+                std.debug.print(
+                    "Best chunk size: {} with {} ms (timer) / {} ms (timestamp)\n",
+                    .{
+                        bench.best_size,
+                        bench.best_time_ns_timer / 1_000_000,
+                        bench.best_time_ns_timestamp / 1_000_000,
+                    },
+                );
+                s = bench.stats;
             } else {
-                const default_chunk_size = chunk_sizes[chunk_sizes.len - 1];
                 s = try countAll(allocator, f, default_chunk_size);
             }
 
@@ -204,6 +189,55 @@ pub fn countAll(allocator: std.mem.Allocator, file: std.fs.File, chunk_size: usi
     return counter.stats;
 }
 
+const BenchmarkOutcome = struct {
+    best_size: usize,
+    stats: Stats,
+    best_time_ns_timer: u64,
+    best_time_ns_timestamp: u64,
+};
+
+fn benchmarkChunkSizes(allocator: std.mem.Allocator, file: *std.fs.File, chunk_sizes: []const usize) !BenchmarkOutcome {
+    if (chunk_sizes.len == 0) return error.NoChunkSizes;
+
+    var timer = try std.time.Timer.start();
+    var outcome = BenchmarkOutcome{
+        .best_size = chunk_sizes[0],
+        .stats = undefined,
+        .best_time_ns_timer = std.math.maxInt(u64),
+        .best_time_ns_timestamp = std.math.maxInt(u64),
+    };
+
+    for (chunk_sizes) |size| {
+        try file.seekTo(0);
+        _ = timer.reset();
+        const start_timestamp = std.time.nanoTimestamp();
+        const stats = try countAll(allocator, file.*, size);
+        const elapsed_timer_ns = timer.read();
+        const end_timestamp = std.time.nanoTimestamp();
+        const elapsed_timestamp_ns = @as(u64, @intCast(end_timestamp - start_timestamp));
+
+        std.debug.print(
+            "Chunk size: {} took {} ms (timer) / {} ms (timestamp)\n",
+            .{
+                size,
+                @divTrunc(elapsed_timer_ns, 1_000_000),
+                @divTrunc(elapsed_timestamp_ns, 1_000_000),
+            },
+        );
+
+        const effective_ns = @min(elapsed_timer_ns, elapsed_timestamp_ns);
+        const best_effective_ns = @min(outcome.best_time_ns_timer, outcome.best_time_ns_timestamp);
+        if (effective_ns < best_effective_ns or (effective_ns == best_effective_ns and size < outcome.best_size)) {
+            outcome.best_size = size;
+            outcome.stats = stats;
+            outcome.best_time_ns_timer = elapsed_timer_ns;
+            outcome.best_time_ns_timestamp = elapsed_timestamp_ns;
+        }
+    }
+
+    return outcome;
+}
+
 test "printLine includes max line and characters" {
     var buffer: [256]u8 = undefined;
     var stream = std.io.fixedBufferStream(&buffer);
@@ -223,9 +257,34 @@ test "printLine includes max line and characters" {
 test "countAll rejects zero chunk size" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var file = try tmp.dir.createFile("sample.txt", .{});
+    var file = try tmp.dir.createFile("sample.txt", .{ .read = true, .truncate = true });
     defer file.close();
     try file.writeAll("hello world");
     try file.seekTo(0);
     try std.testing.expectError(error.InvalidChunkSize, countAll(std.testing.allocator, file, 0));
+}
+
+test "benchmarkChunkSizes handles empty candidates" {
+    if (!enable_benchmarking) return;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var file = try tmp.dir.createFile("sample.txt", .{ .read = true, .truncate = true });
+    defer file.close();
+    try file.writeAll("sample data\n");
+    try file.seekTo(0);
+    try std.testing.expectError(error.NoChunkSizes, benchmarkChunkSizes(std.testing.allocator, &file, &[_]usize{}));
+}
+
+test "benchmarkChunkSizes returns stats" {
+    if (!enable_benchmarking) return;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var file = try tmp.dir.createFile("sample.txt", .{ .read = true, .truncate = true });
+    defer file.close();
+    try file.writeAll("hello\nworld\n");
+    try file.seekTo(0);
+    const bench = try benchmarkChunkSizes(std.testing.allocator, &file, &[_]usize{ 4, 8 });
+    try std.testing.expectEqual(@as(usize, 2), bench.stats.lines);
+    try std.testing.expectEqual(@as(usize, 2), bench.stats.words);
+    try std.testing.expectEqual(@as(usize, 12), bench.stats.bytes);
 }

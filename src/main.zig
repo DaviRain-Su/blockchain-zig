@@ -189,6 +189,7 @@ fn printLine(w: anytype, s: Stats, name: ?[]const u8, want_l: bool, want_w: bool
 }
 
 pub fn countAll(allocator: std.mem.Allocator, file: std.fs.File, chunk_size: usize) !Stats {
+    if (chunk_size == 0) return error.InvalidChunkSize;
     var counter = Counter.init();
     var chunk: []u8 = try allocator.alloc(u8, chunk_size);
     defer allocator.free(chunk);
@@ -201,4 +202,30 @@ pub fn countAll(allocator: std.mem.Allocator, file: std.fs.File, chunk_size: usi
 
     counter.finish();
     return counter.stats;
+}
+
+test "printLine includes max line and characters" {
+    var buffer: [256]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buffer);
+    const stats = Stats{
+        .lines = 1,
+        .bytes = 10,
+        .words = 2,
+        .max_line_length = 42,
+        .characters = 11,
+    };
+    try printLine(stream.writer(), stats, "sample.txt", true, true, true, true, true);
+    const output = stream.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, output, "max line length: 42") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "characters: 11") != null);
+}
+
+test "countAll rejects zero chunk size" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var file = try tmp.dir.createFile("sample.txt", .{});
+    defer file.close();
+    try file.writeAll("hello world");
+    try file.seekTo(0);
+    try std.testing.expectError(error.InvalidChunkSize, countAll(std.testing.allocator, file, 0));
 }

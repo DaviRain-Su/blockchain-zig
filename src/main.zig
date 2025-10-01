@@ -36,6 +36,8 @@ pub fn main() !void {
     var want_m = false;
 
     var i: usize = 1;
+    var jobs: usize = 1;
+
     while (i < args.len and args[i].len >= 2 and args[i][0] == '-') {
         if (std.mem.eql(u8, args[i], "--")) { // 终止选项
             i += 1;
@@ -49,8 +51,26 @@ pub fn main() !void {
             try stderr.print("  -h  help\n", .{});
             try stderr.print("  - read from stdin\n", .{});
             try stderr.print("  -- end of options\n", .{});
+            try stderr.print("  -j  jobs: number of jobs to run concurrently, jobs must be >= 1\n", .{});
             try stderr.flush();
             std.process.exit(0);
+        }
+        if (std.mem.eql(u8, args[i], "-j")) {
+            if (i + 1 >= args.len) {
+                try stderr.print("missing value for -j\n", .{});
+                std.process.exit(1);
+            }
+            const n = std.fmt.parseInt(usize, args[i + 1], 10) catch {
+                try stderr.print("invalid value for -j: {s}\n", .{args[i + 1]});
+                std.process.exit(1);
+            };
+            if (n == 0) {
+                try stderr.print("jobs must be >= 1\n", .{});
+                std.process.exit(1);
+            }
+            jobs = n;
+            i += 2; // 消费 "-j" 和数字
+            continue;
         }
 
         const opt = args[i];
